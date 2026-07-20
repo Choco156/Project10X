@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>자산관리 대시보드</title>
+<style>
+  :root{
+    --bg:#f5f6f8;
+    --card:#ffffff;
+    --border:#e5e7eb;
+    --text:#1f2430;
+    --text-dim:#6b7280;
+    --accent:#3b5bdb;
+    --accent-soft:#eef1ff;
+    --cash:#3b5bdb;
+    --stock:#0ea5a5;
+    --pension:#f59f00;
+    --danger:#e03131;
+    --shadow: 0 1px 2px rgba(16,24,40,0.04), 0 1px 3px rgba(16,24,40,0.06);
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR",Segoe UI,sans-serif;
+    background:var(--bg);
+    color:var(--text);
+    padding:24px 16px 60px;
+  }
+  .wrap{max-width:1080px;margin:0 auto;}
+  header{
+    display:flex;justify-content:space-between;align-items:flex-end;
+    margin-bottom:22px;flex-wrap:wrap;gap:12px;
+  }
+  header h1{font-size:20px;margin:0 0 4px;font-weight:700;}
+  header .sub{font-size:13px;color:var(--text-dim);}
+  #refresh-btn{
+    border:1px solid var(--border);background:var(--card);
+    padding:8px 14px;border-radius:8px;font-size:13px;cursor:pointer;
+    color:var(--text);box-shadow:var(--shadow);
+    display:flex;align-items:center;gap:6px;
+  }
+  #refresh-btn:hover{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);}
+  #refresh-btn:disabled{opacity:0.5;cursor:default;}
+  .spin{animation:spin 0.9s linear infinite;display:inline-block;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+
+  .cards{
+    display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:24px;
+  }
+  @media(max-width:800px){.cards{grid-template-columns:repeat(2,1fr);}}
+  .card{
+    background:var(--card);border:1px solid var(--border);border-radius:14px;
+    padding:18px 18px;box-shadow:var(--shadow);
+  }
+  .card .label{font-size:12.5px;color:var(--text-dim);margin-bottom:8px;display:flex;align-items:center;gap:6px;}
+  .dot{width:8px;height:8px;border-radius:50%;display:inline-block;}
+  .card .value{font-size:22px;font-weight:700;letter-spacing:-0.3px;}
+  .card.total{background:linear-gradient(135deg,#3b5bdb,#5b7cfa);border:none;}
+  .card.total .label{color:rgba(255,255,255,0.85);}
+  .card.total .value{color:#fff;font-size:26px;}
+
+  .main-grid{
+    display:grid;grid-template-columns:320px 1fr;gap:16px;
+  }
+  @media(max-width:800px){.main-grid{grid-template-columns:1fr;}}
+
+  .panel{
+    background:var(--card);border:1px solid var(--border);border-radius:14px;
+    padding:20px;box-shadow:var(--shadow);
+  }
+  .panel h2{font-size:14px;margin:0 0 14px;font-weight:700;}
+
+  #donut-wrap{display:flex;flex-direction:column;align-items:center;gap:16px;}
+  .legend{width:100%;font-size:13px;}
+  .legend-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px dashed var(--border);}
+  .legend-row:last-child{border-bottom:none;}
+  .legend-row .name{display:flex;align-items:center;gap:8px;color:var(--text-dim);}
+  .legend-row .amt{font-weight:600;}
+
+  .tabs{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap;}
+  .tab-btn{
+    border:1px solid var(--border);background:var(--bg);color:var(--text-dim);
+    padding:7px 14px;border-radius:20px;font-size:13px;cursor:pointer;
+  }
+  .tab-btn.active{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600;}
+
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  thead th{
+    text-align:left;color:var(--text-dim);font-weight:600;font-size:12px;
+    padding:8px 10px;border-bottom:1px solid var(--border);white-space:nowrap;
+  }
+  tbody td{padding:10px 10px;border-bottom:1px solid #f0f1f3;white-space:nowrap;}
+  tbody tr:hover{background:#fafbff;}
+  td.num{text-align:right;font-variant-numeric:tabular-nums;}
+  td.name{font-weight:500;}
+  .badge{
+    font-size:11px;padding:2px 8px;border-radius:20px;background:var(--accent-soft);color:var(--accent);
+  }
+  .subtotal-row td{font-weight:700;background:#fafbfc;border-top:1px solid var(--border);}
+
+  #status{font-size:12px;color:var(--text-dim);margin-top:14px;text-align:right;}
+  #error-box{
+    display:none;background:#fff5f5;border:1px solid #ffc9c9;color:var(--danger);
+    padding:12px 16px;border-radius:10px;font-size:13px;margin-bottom:20px;
+  }
+  .empty{color:var(--text-dim);font-size:13px;padding:20px;text-align:center;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div>
+      <h1>💰 자산관리 대시보드</h1>
+      <div class="sub" id="last-updated">데이터를 불러오는 중...</div>
+    </div>
+    <button id="refresh-btn" onclick="loadAll()">
+      <span id="refresh-icon">↻</span> 새로고침
+    </button>
+  </header>
+
+  <div id="error-box"></div>
+
+  <div class="cards">
+    <div class="card total">
+      <div class="label">총자산</div>
+      <div class="value" id="total-asset">-</div>
+    </div>
+    <div class="card">
+      <div class="label"><span class="dot" style="background:var(--cash)"></span>예금/현금</div>
+      <div class="value" id="total-cash">-</div>
+    </div>
+    <div class="card">
+      <div class="label"><span class="dot" style="background:var(--stock)"></span>주식/ETF</div>
+      <div class="value" id="total-stock">-</div>
+    </div>
+    <div class="card">
+      <div class="label"><span class="dot" style="background:var(--pension)"></span>연금/보험</div>
+      <div class="value" id="total-pension">-</div>
+    </div>
+  </div>
+
+  <div class="main-grid">
+    <div class="panel">
+      <h2>자산 비중</h2>
+      <div id="donut-wrap">
+        <svg width="180" height="180" viewBox="0 0 180 180" id="donut-svg"></svg>
+        <div class="legend" id="legend"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="tabs">
+        <button class="tab-btn active" data-tab="cash" onclick="switchTab('cash')">예금/현금</button>
+        <button class="tab-btn" data-tab="stock" onclick="switchTab('stock')">주식/ETF</button>
+        <button class="tab-btn" data-tab="pension" onclick="switchTab('pension')">연금/보험</button>
+      </div>
+      <div id="table-wrap"><div class="empty">불러오는 중...</div></div>
+    </div>
+  </div>
+
+  <div id="status"></div>
+</div>
+
+<script>
+const SHEET_ID = "1GDFyLtG7wRC1HgrIp6vCKs3jnm1DYd2h";
+const TABS = {
+  cash:   { sheet: "예금현금", cols: ["구분","계좌명/은행","잔액","업데이트일"] },
+  stock:  { sheet: "주식ETF",  cols: ["구분","종목명","종목코드","수량","평단가","현재가","평가금액"] },
+  pension:{ sheet: "연금보험", cols: ["구분","상품명","유형","현재평가액","총납입액","업데이트일"] }
+};
+
+let DATA = { cash: [], stock: [], pension: [] };
+let currentTab = "cash";
+let loadedCount = 0;
+let hasError = false;
+
+function fmtWon(n){
+  if(isNaN(n)) return "0원";
+  return Math.round(n).toLocaleString("ko-KR") + "원";
+}
+
+function gvizUrl(sheetName){
+  return `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}&t=${Date.now()}`;
+}
+
+// JSONP 콜백 방식으로 gviz 응답 파싱
+function fetchSheet(tabKey){
+  return new Promise((resolve) => {
+    const cfg = TABS[tabKey];
+    const callbackName = "gvizCallback_" + tabKey + "_" + Date.now();
+    window[callbackName] = function(json){
+      try{
+        const rows = json.table.rows.map(r => r.c.map(c => c ? (c.f ?? c.v) : null));
+        resolve(rows);
+      }catch(e){
+        resolve([]);
+      }
+      delete window[callbackName];
+      script.remove();
+    };
+
+    const script = document.createElement("script");
+    script.onerror = () => { resolve(null); delete window[callbackName]; script.remove(); };
+    // gviz는 기본적으로 google.visualization.Query.setResponse 를 부르므로
+    // responseHandler 파라미터로 콜백명을 지정
+    script.src = gvizUrl(cfg.sheet) + `&responseHandler=${callbackName}`;
+    document.body.appendChild(script);
+  });
+}
+
+async function loadAll(){
+  const btn = document.getElementById("refresh-btn");
+  const icon = document.getElementById("refresh-icon");
+  btn.disabled = true;
+  icon.classList.add("spin");
+  document.getElementById("error-box").style.display = "none";
+  hasError = false;
+
+  const keys = Object.keys(TABS);
+  const results = await Promise.all(keys.map(k => fetchSheet(k)));
+
+  keys.forEach((k, i) => {
+    if(results[i] === null){ hasError = true; }
+    DATA[k] = results[i] || [];
+  });
+
+  if(hasError){
+    showError("일부 시트를 불러오지 못했어요. 시트 공유 설정(링크가 있는 모든 사용자 - 뷰어)을 확인해주세요.");
+  }
+
+  renderCards();
+  renderDonut();
+  renderTable(currentTab);
+
+  document.getElementById("last-updated").textContent =
+    "마지막 업데이트: " + new Date().toLocaleString("ko-KR");
+  btn.disabled = false;
+  icon.classList.remove("spin");
+}
+
+function showError(msg){
+  const box = document.getElementById("error-box");
+  box.textContent = "⚠ " + msg;
+  box.style.display = "block";
+}
+
+function sumCol(rows, idx){
+  return rows.reduce((s, r) => s + (parseFloat(r[idx]) || 0), 0);
+}
+
+function renderCards(){
+  const cashTotal = sumCol(DATA.cash, 2);       // 잔액
+  const stockTotal = sumCol(DATA.stock, 6);      // 평가금액
+  const pensionTotal = sumCol(DATA.pension, 3);  // 현재평가액
+  const total = cashTotal + stockTotal + pensionTotal;
+
+  document.getElementById("total-asset").textContent = fmtWon(total);
+  document.getElementById("total-cash").textContent = fmtWon(cashTotal);
+  document.getElementById("total-stock").textContent = fmtWon(stockTotal);
+  document.getElementById("total-pension").textContent = fmtWon(pensionTotal);
+
+  return { cashTotal, stockTotal, pensionTotal, total };
+}
+
+function renderDonut(){
+  const { cashTotal, stockTotal, pensionTotal, total } = renderCards();
+  const svg = document.getElementById("donut-svg");
+  const legend = document.getElementById("legend");
+  svg.innerHTML = "";
+  legend.innerHTML = "";
+
+  const segments = [
+    { name:"예금/현금", value:cashTotal, color:"var(--cash)", raw:"#3b5bdb" },
+    { name:"주식/ETF", value:stockTotal, color:"var(--stock)", raw:"#0ea5a5" },
+    { name:"연금/보험", value:pensionTotal, color:"var(--pension)", raw:"#f59f00" },
+  ];
+
+  if(total <= 0){
+    svg.outerHTML = svg.outerHTML;
+    legend.innerHTML = '<div class="empty">데이터가 없습니다</div>';
+    return;
+  }
+
+  const cx=90, cy=90, r=70, strokeW=26;
+  const circumference = 2 * Math.PI * r;
+  let offset = 0;
+
+  segments.forEach(seg => {
+    const frac = seg.value / total;
+    if(frac <= 0) return;
+    const dash = frac * circumference;
+    const circle = document.createElementNS("http://www.w3.org/2000/svg","circle");
+    circle.setAttribute("cx", cx);
+    circle.setAttribute("cy", cy);
+    circle.setAttribute("r", r);
+    circle.setAttribute("fill", "none");
+    circle.setAttribute("stroke", seg.raw);
+    circle.setAttribute("stroke-width", strokeW);
+    circle.setAttribute("stroke-dasharray", `${dash} ${circumference - dash}`);
+    circle.setAttribute("stroke-dashoffset", -offset);
+    circle.setAttribute("transform", `rotate(-90 ${cx} ${cy})`);
+    svg.appendChild(circle);
+    offset += dash;
+
+    const row = document.createElement("div");
+    row.className = "legend-row";
+    row.innerHTML = `
+      <span class="name"><span class="dot" style="background:${seg.raw}"></span>${seg.name}</span>
+      <span class="amt">${fmtWon(seg.value)} <span style="color:var(--text-dim);font-weight:400;">(${(frac*100).toFixed(1)}%)</span></span>
+    `;
+    legend.appendChild(row);
+  });
+}
+
+function switchTab(tab){
+  currentTab = tab;
+  document.querySelectorAll(".tab-btn").forEach(b => {
+    b.classList.toggle("active", b.dataset.tab === tab);
+  });
+  renderTable(tab);
+}
+
+function renderTable(tab){
+  const cfg = TABS[tab];
+  const rows = DATA[tab];
+  const wrap = document.getElementById("table-wrap");
+
+  if(!rows || rows.length === 0){
+    wrap.innerHTML = '<div class="empty">데이터가 없습니다. 시트에 값을 입력해주세요.</div>';
+    return;
+  }
+
+  let sumIdx, sumLabel;
+  if(tab === "cash"){ sumIdx = 2; sumLabel = "합계"; }
+  if(tab === "stock"){ sumIdx = 6; sumLabel = "합계"; }
+  if(tab === "pension"){ sumIdx = 3; sumLabel = "합계"; }
+
+  let html = "<table><thead><tr>";
+  cfg.cols.forEach(c => html += `<th>${c}</th>`);
+  html += "</tr></thead><tbody>";
+
+  rows.forEach(r => {
+    html += "<tr>";
+    r.forEach((val, idx) => {
+      const isNum = typeof val === "number";
+      if(idx === 0){
+        html += `<td><span class="badge">${val ?? ""}</span></td>`;
+      } else if(isNum){
+        html += `<td class="num">${fmtWon(val)}</td>`;
+      } else {
+        html += `<td class="name">${val ?? ""}</td>`;
+      }
+    });
+    html += "</tr>";
+  });
+
+  const total = sumCol(rows, sumIdx);
+  html += `<tr class="subtotal-row">`;
+  cfg.cols.forEach((c, idx) => {
+    if(idx === 0) html += `<td>${sumLabel}</td>`;
+    else if(idx === sumIdx) html += `<td class="num">${fmtWon(total)}</td>`;
+    else html += `<td></td>`;
+  });
+  html += `</tr>`;
+
+  html += "</tbody></table>";
+  wrap.innerHTML = html;
+}
+
+loadAll();
+</script>
+</body>
+</html>
