@@ -99,6 +99,26 @@
   }
   .subtotal-row td{font-weight:700;background:#fafbfc;border-top:1px solid var(--border);}
 
+  .goal-section{margin-bottom:16px;}
+  .goal-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;}
+  .goal-card{
+    background:var(--card);border:1px solid var(--border);border-radius:14px;
+    padding:18px;box-shadow:var(--shadow);
+  }
+  .goal-card .g-name{font-size:13.5px;font-weight:700;margin-bottom:10px;}
+  .goal-card .g-nums{display:flex;justify-content:space-between;font-size:12.5px;color:var(--text-dim);margin-bottom:8px;}
+  .goal-card .g-nums b{color:var(--text);font-weight:700;}
+  .progress-track{height:10px;background:#eef0f3;border-radius:20px;overflow:hidden;}
+  .progress-fill{height:100%;background:linear-gradient(90deg,#3b5bdb,#5b7cfa);border-radius:20px;transition:width 0.4s ease;}
+  .goal-card .g-pct{font-size:12px;color:var(--accent);font-weight:700;margin-top:6px;text-align:right;}
+
+  .growth-panel{margin-top:16px;}
+  .growth-stats{display:flex;gap:20px;margin-bottom:14px;flex-wrap:wrap;}
+  .growth-stat{font-size:12.5px;color:var(--text-dim);}
+  .growth-stat b{display:block;font-size:15px;color:var(--text);margin-top:2px;}
+  .growth-stat b.up{color:#2f9e44;}
+  .growth-stat b.down{color:var(--danger);}
+
   #status{font-size:12px;color:var(--text-dim);margin-top:14px;text-align:right;}
   #error-box{
     display:none;background:#fff5f5;border:1px solid #ffc9c9;color:var(--danger);
@@ -141,6 +161,10 @@
     </div>
   </div>
 
+  <div class="goal-section">
+    <div class="goal-grid" id="goal-grid"></div>
+  </div>
+
   <div class="main-grid">
     <div class="panel">
       <h2>자산 비중</h2>
@@ -160,6 +184,12 @@
     </div>
   </div>
 
+  <div class="panel growth-panel">
+    <h2>순자산 성장</h2>
+    <div class="growth-stats" id="growth-stats"></div>
+    <svg width="100%" height="220" viewBox="0 0 900 220" preserveAspectRatio="none" id="growth-svg"></svg>
+  </div>
+
   <div id="status"></div>
 </div>
 
@@ -170,8 +200,15 @@ const TABS = {
   stock:  { sheet: "주식ETF",  cols: ["구분","종목명","종목코드","수량","평단가","현재가","평가금액"] },
   pension:{ sheet: "연금보험", cols: ["구분","상품명","유형","현재평가액","총납입액","업데이트일"] }
 };
+// 표(table)로 렌더링되지 않는 보조 탭 — 목표 카드 / 성장 그래프 전용
+const EXTRA_TABS = {
+  monthly: { sheet: "월별기록" },
+  goals:   { sheet: "목표" }
+};
 
 let DATA = { cash: [], stock: [], pension: [] };
+let EXTRA = { monthly: [], goals: [] };
+let TOTALS = { cashTotal:0, stockTotal:0, pensionTotal:0, total:0 };
 let currentTab = "cash";
 let loadedCount = 0;
 let hasError = false;
@@ -186,9 +223,9 @@ function gvizUrl(sheetName){
 }
 
 // JSONP 콜백 방식으로 gviz 응답 파싱
-function fetchSheet(tabKey){
+function fetchSheet(tabKey, tabsConfig){
   return new Promise((resolve) => {
-    const cfg = TABS[tabKey];
+    const cfg = tabsConfig[tabKey];
     const callbackName = "gvizCallback_" + tabKey + "_" + Date.now();
     window[callbackName] = function(json){
       try{
@@ -219,11 +256,19 @@ async function loadAll(){
   hasError = false;
 
   const keys = Object.keys(TABS);
-  const results = await Promise.all(keys.map(k => fetchSheet(k)));
+  const extraKeys = Object.keys(EXTRA_TABS);
+  const [results, extraResults] = await Promise.all([
+    Promise.all(keys.map(k => fetchSheet(k, TABS))),
+    Promise.all(extraKeys.map(k => fetchSheet(k, EXTRA_TABS)))
+  ]);
 
   keys.forEach((k, i) => {
     if(results[i] === null){ hasError = true; }
     DATA[k] = results[i] || [];
+  });
+  extraKeys.forEach((k, i) => {
+    // 월별기록/목표 탭은 선택사항이라 없어도 에러로 취급하지 않음
+    EXTRA[k] = extraResults[i] || [];
   });
 
   if(hasError){
@@ -233,6 +278,8 @@ async function loadAll(){
   renderCards();
   renderDonut();
   renderTable(currentTab);
+  renderGoals();
+  renderGrowth();
 
   document.getElementById("last-updated").textContent =
     "마지막 업데이트: " + new Date().toLocaleString("ko-KR");
@@ -261,7 +308,8 @@ function renderCards(){
   document.getElementById("total-stock").textContent = fmtWon(stockTotal);
   document.getElementById("total-pension").textContent = fmtWon(pensionTotal);
 
-  return { cashTotal, stockTotal, pensionTotal, total };
+  TOTALS = { cashTotal, stockTotal, pensionTotal, total };
+  return TOTALS;
 }
 
 function renderDonut(){
@@ -367,6 +415,127 @@ function renderTable(tab){
 
   html += "</tbody></table>";
   wrap.innerHTML = html;
+}
+
+function renderGoals(){
+  const grid = document.getElementById("goal-grid");
+  const goals = EXTRA.goals;
+  const currentTotal = TOTALS.total || 0;
+
+  if(!goals || goals.length === 0){
+    grid.innerHTML = "";
+    grid.parentElement.style.display = "none";
+    return;
+  }
+  grid.parentElement.style.display = "block";
+
+  grid.innerHTML = goals.map(row => {
+    const name = row[0] ?? "목표";
+    const target = parseFloat(row[1]) || 0;
+    if(target <= 0) return "";
+    const pct = Math.min(100, (currentTotal / target) * 100);
+    const remain = Math.max(0, target - currentTotal);
+    return `
+      <div class="goal-card">
+        <div class="g-name">🎯 ${name}</div>
+        <div class="g-nums">
+          <span>현재 <b>${fmtWon(currentTotal)}</b></span>
+          <span>목표 <b>${fmtWon(target)}</b></span>
+        </div>
+        <div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div>
+        <div class="g-pct">${pct.toFixed(1)}% 달성 · 남은 금액 ${fmtWon(remain)}</div>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderGrowth(){
+  const rows = (EXTRA.monthly || [])
+    .filter(r => r[0] && !isNaN(parseFloat(r[1])))
+    .map(r => ({ date: r[0], value: parseFloat(r[1]) }));
+
+  const svg = document.getElementById("growth-svg");
+  const statsBox = document.getElementById("growth-stats");
+  svg.innerHTML = "";
+
+  if(rows.length < 2){
+    statsBox.innerHTML = `<div class="growth-stat">월별기록 탭에 2개월 이상 데이터를 추가하면 그래프가 표시됩니다.</div>`;
+    svg.style.display = "none";
+    return;
+  }
+  svg.style.display = "block";
+
+  const values = rows.map(r => r.value);
+  const max = Math.max(...values), min = Math.min(...values);
+  const first = values[0], last = values[values.length - 1];
+  const change = last - first;
+  const changeCls = change >= 0 ? "up" : "down";
+  const changeSign = change >= 0 ? "+" : "";
+
+  statsBox.innerHTML = `
+    <div class="growth-stat">최고 순자산<b>${fmtWon(max)}</b></div>
+    <div class="growth-stat">최저 순자산<b>${fmtWon(min)}</b></div>
+    <div class="growth-stat">전체 증감<b class="${changeCls}">${changeSign}${fmtWon(change)}</b></div>
+  `;
+
+  const W = 900, H = 220, padL = 10, padR = 10, padT = 20, padB = 30;
+  const range = (max - min) || 1;
+  const stepX = (W - padL - padR) / (rows.length - 1);
+
+  const points = rows.map((r, i) => {
+    const x = padL + i * stepX;
+    const y = padT + (H - padT - padB) * (1 - (r.value - min) / range);
+    return { x, y, ...r };
+  });
+
+  const linePath = points.map((p, i) => (i === 0 ? "M" : "L") + p.x.toFixed(1) + "," + p.y.toFixed(1)).join(" ");
+  const areaPath = linePath + ` L${points[points.length-1].x.toFixed(1)},${H-padB} L${points[0].x.toFixed(1)},${H-padB} Z`;
+
+  const ns = "http://www.w3.org/2000/svg";
+  const area = document.createElementNS(ns, "path");
+  area.setAttribute("d", areaPath);
+  area.setAttribute("fill", "url(#growthGrad)");
+  area.setAttribute("stroke", "none");
+
+  const defs = document.createElementNS(ns, "defs");
+  defs.innerHTML = `
+    <linearGradient id="growthGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3b5bdb" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="#3b5bdb" stop-opacity="0"/>
+    </linearGradient>
+  `;
+
+  const line = document.createElementNS(ns, "path");
+  line.setAttribute("d", linePath);
+  line.setAttribute("fill", "none");
+  line.setAttribute("stroke", "#3b5bdb");
+  line.setAttribute("stroke-width", "2.5");
+  line.setAttribute("stroke-linecap", "round");
+  line.setAttribute("stroke-linejoin", "round");
+
+  svg.appendChild(defs);
+  svg.appendChild(area);
+  svg.appendChild(line);
+
+  points.forEach((p, i) => {
+    const c = document.createElementNS(ns, "circle");
+    c.setAttribute("cx", p.x);
+    c.setAttribute("cy", p.y);
+    c.setAttribute("r", i === points.length - 1 ? 4 : 2.5);
+    c.setAttribute("fill", "#3b5bdb");
+    svg.appendChild(c);
+
+    if(i === 0 || i === points.length - 1 || i % Math.ceil(points.length / 6) === 0){
+      const label = document.createElementNS(ns, "text");
+      label.setAttribute("x", p.x);
+      label.setAttribute("y", H - 10);
+      label.setAttribute("font-size", "11");
+      label.setAttribute("fill", "#6b7280");
+      label.setAttribute("text-anchor", i === 0 ? "start" : (i === points.length - 1 ? "end" : "middle"));
+      label.textContent = p.date;
+      svg.appendChild(label);
+    }
+  });
 }
 
 loadAll();
