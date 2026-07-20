@@ -194,7 +194,7 @@
 </div>
 
 <script>
-const SHEET_ID = "1GDFyLtG7wRC1HgrIp6vCKs3jnm1DYd2h";
+const SHEET_ID = "1H2Md1SCZ7CN2cTIkCfGWm3LxNuySt_fSyqbRyrpnlSM";
 const TABS = {
   cash:   { sheet: "예금현금", cols: ["구분","계좌명/은행","잔액","업데이트일"] },
   stock:  { sheet: "주식ETF",  cols: ["구분","종목명","종목코드","수량","평단가","현재가","평가금액"] },
@@ -218,8 +218,8 @@ function fmtWon(n){
   return Math.round(n).toLocaleString("ko-KR") + "원";
 }
 
-function gvizUrl(sheetName){
-  return `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}&t=${Date.now()}`;
+function gvizUrl(sheetName, callbackName){
+  return `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:json;responseHandler:${callbackName}&sheet=${encodeURIComponent(sheetName)}&t=${Date.now()}`;
 }
 
 // JSONP 콜백 방식으로 gviz 응답 파싱
@@ -229,7 +229,13 @@ function fetchSheet(tabKey, tabsConfig){
     const callbackName = "gvizCallback_" + tabKey + "_" + Date.now();
     window[callbackName] = function(json){
       try{
-        const rows = json.table.rows.map(r => r.c.map(c => c ? (c.f ?? c.v) : null));
+        const rows = json.table.rows.map(r => r.c.map(c => {
+          if(!c) return null;
+          // 숫자 셀은 원본 값(v)을 그대로 사용 (콤마 등 표시서식 문자열은 계산에 쓰지 않음)
+          if(typeof c.v === "number") return c.v;
+          // 날짜/텍스트 셀은 표시용 포맷(f)이 있으면 그걸 우선 사용
+          return c.f ?? c.v;
+        }));
         resolve(rows);
       }catch(e){
         resolve([]);
@@ -240,9 +246,7 @@ function fetchSheet(tabKey, tabsConfig){
 
     const script = document.createElement("script");
     script.onerror = () => { resolve(null); delete window[callbackName]; script.remove(); };
-    // gviz는 기본적으로 google.visualization.Query.setResponse 를 부르므로
-    // responseHandler 파라미터로 콜백명을 지정
-    script.src = gvizUrl(cfg.sheet) + `&responseHandler=${callbackName}`;
+    script.src = gvizUrl(cfg.sheet, callbackName);
     document.body.appendChild(script);
   });
 }
@@ -293,8 +297,18 @@ function showError(msg){
   box.style.display = "block";
 }
 
+function toNumber(val){
+  if(typeof val === "number") return val;
+  if(typeof val === "string"){
+    const cleaned = val.replace(/[,원\s]/g, "");
+    const n = parseFloat(cleaned);
+    return isNaN(n) ? 0 : n;
+  }
+  return 0;
+}
+
 function sumCol(rows, idx){
-  return rows.reduce((s, r) => s + (parseFloat(r[idx]) || 0), 0);
+  return rows.reduce((s, r) => s + toNumber(r[idx]), 0);
 }
 
 function renderCards(){
@@ -431,7 +445,7 @@ function renderGoals(){
 
   grid.innerHTML = goals.map(row => {
     const name = row[0] ?? "목표";
-    const target = parseFloat(row[1]) || 0;
+    const target = toNumber(row[1]);
     if(target <= 0) return "";
     const pct = Math.min(100, (currentTotal / target) * 100);
     const remain = Math.max(0, target - currentTotal);
